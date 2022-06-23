@@ -29,7 +29,7 @@ begin
 	function s!(du,u,A,t)
 		du.=u.^3 * A
 	end
-	tspiral = (0.0,25) 
+	tspiral = (0.0,30) 
 
 	odeSpiral=ODEProblem(s!,spiralu0,tspiral,A)
 end
@@ -55,14 +55,14 @@ begin
 end
 
 # ╔═╡ 292484ee-70ad-4e90-ac71-83a90968afb1
-prob_trueode=odeLorenz
+prob_trueode=odeSpiral
 
 # ╔═╡ 7bcdbdc4-95c7-4492-8898-7cedbd174335
 sol_trueode=solve(prob_trueode,Tsit5(), saveat = tsteps) 
 
 # ╔═╡ 7d54362e-053c-403e-9ca0-43a6f10c3185
-#data_trueode=dropdims(Array(sol_trueode), dims=1) # spiral ends up with a singleton dimension?! 
-data_trueode=Array(sol_trueode)
+data_trueode=dropdims(Array(sol_trueode), dims=1) # spiral ends up with a singleton dimension?! 
+#data_trueode=Array(sol_trueode)
 
 
 # ╔═╡ 809b5607-5a18-49bd-8b32-cd3c53d93307
@@ -83,11 +83,11 @@ rng = Random.default_rng()
 # ╔═╡ 483fd793-0a45-41fd-a29d-ed80ac5158af
 #Lux.ActivationFunction(x -> x.^3)
 	dudt2 = Lux.Chain(
-#		ActivationFunction(x -> x.^3),
+		ActivationFunction(x -> x.^3),
 					Lux.Dense(3, 50, tanh),
-					Lux.Dense(50,50,tanh),
-					Lux.Dense(50,50,tanh),
-					Lux.Dense(50,50,tanh),
+#					Lux.Dense(50,50,tanh),
+#					Lux.Dense(50,50,tanh),
+#					Lux.Dense(50,50,tanh),
 				Lux.Dense(50, 3))		
 #		,
 #					p -> solve(prob_trueode,Tsit5(),p=p)[1,:])
@@ -103,7 +103,7 @@ prob_neuralode = DiffEqFlux.NeuralODE(dudt2, tspan, Tsit5(), saveat = tsteps)
 
 # ╔═╡ 98685f21-7d18-41a1-92be-2d4a93ca1248
 function predict_neuralode(p)
-  Array(prob_neuralode(u0, p, st)[1])
+  Array(prob_neuralode([2;0;0], p, st)[1])
 end
 
 # ╔═╡ 7f2aa049-38b8-4436-a04f-f639290e8b0b
