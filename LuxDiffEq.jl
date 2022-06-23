@@ -10,6 +10,7 @@ begin
 	using DiffEqFlux, DifferentialEquations, Optimization, OptimizationOptimJL, Random
 
 	using Plots
+	using Gnuplot
 end
 
 # ╔═╡ 1a1f1c13-e418-475b-b4ec-db8bf3c15ea2
@@ -20,7 +21,22 @@ end
 # ╔═╡ b64a6376-9b71-4b85-887f-f9f3e1bccd83
 md"# Lorenz Attractor ODE spec"
 
+# ╔═╡ 046b6282-b65d-434e-9916-3454921497dd
+# hard-edged cubic spiral
+begin
+	A=[-0.1 2.0 0; -2 -0.1 0; 0 0 0]
+	spiralu0=[2 0 0]
+	function s!(du,u,A,t)
+		du.=u.^3 * A
+	end
+	tspiral = (0.0,25) 
+
+	odeSpiral=ODEProblem(s!,spiralu0,tspiral,A)
+end
+
 # ╔═╡ 7372e97b-dcdb-41b3-bb30-697b8c652482
+# Lorenz attractor spec
+
 begin
 	# From https://diffeq.sciml.ai/stable/analysis/uncertainty_quantification/#Example-3:-Adaptive-ProbInts-on-the-Lorenz-Attractor
 	function g(du,u,p,t)
@@ -28,26 +44,35 @@ begin
 	 du[2] = u[1]*(p[2]-u[3]) - u[2]
 	 du[3] = u[1]*u[2] - p[3]*u[3]
 	end
-	u0 = [1.0;0.0;0.0]
+	u0 = [-9.31058;-8.78892;28.7029] # start in stable left-hand node
+	#u0 = [1.0,0,0] # start on right hand lobe and jump straight to left
 	tspan = (0.0,30) # starts hopping between lobes @ t=15
 	datasize=500
 	tsteps = range(tspan[1], tspan[2], length = datasize)
 	ode_params = [10.0,28.0,8/3]
-	prob_trueode = ODEProblem(g,u0,tspan,ode_params)
+	odeLorenz = ODEProblem(g,u0,tspan,ode_params)
 	
 end
+
+# ╔═╡ 292484ee-70ad-4e90-ac71-83a90968afb1
+prob_trueode=odeLorenz
 
 # ╔═╡ 7bcdbdc4-95c7-4492-8898-7cedbd174335
 sol_trueode=solve(prob_trueode,Tsit5(), saveat = tsteps) 
 
 # ╔═╡ 7d54362e-053c-403e-9ca0-43a6f10c3185
-data_trueode=sol_trueode|> Array
+#data_trueode=dropdims(Array(sol_trueode), dims=1) # spiral ends up with a singleton dimension?! 
+data_trueode=Array(sol_trueode)
 
-# ╔═╡ 7f06aea9-881c-4b41-b21e-c5c4ce599f71
-plot(sol_trueode,vars=(0,1))
 
-# ╔═╡ 2db04213-5bd5-43e9-b2b0-8b5cec3bd7ef
-plot(sol_trueode,vars=(1,3))
+# ╔═╡ 809b5607-5a18-49bd-8b32-cd3c53d93307
+begin
+	@gp sol_trueode.t sol_trueode[1,:] "w lp"
+	@gp :- sol_trueode.t sol_trueode[2,:] "w lp"
+end
+
+# ╔═╡ f4e1df28-652b-42de-835c-69a678d2b6dc
+@gp sol_trueode[1,:] sol_trueode[2,:] "w lp"
 
 # ╔═╡ 653a1bee-a90f-47a5-b77e-aa6f0721d738
 md"# Neural ODE"
@@ -58,14 +83,20 @@ rng = Random.default_rng()
 # ╔═╡ 483fd793-0a45-41fd-a29d-ed80ac5158af
 #Lux.ActivationFunction(x -> x.^3)
 	dudt2 = Lux.Chain(
-		#ActivationFunction(x -> x.^3),
-					Lux.Dense(3, 20, tanh),
-#					Lux.Dense(50, 50, tanh),
-#					Lux.Dense(50, 50, tanh),
-	                Lux.Dense(20, 3, tanh))
+#		ActivationFunction(x -> x.^3),
+					Lux.Dense(3, 50, tanh),
+					Lux.Dense(50,50,tanh),
+					Lux.Dense(50,50,tanh),
+					Lux.Dense(50,50,tanh),
+				Lux.Dense(50, 3))		
+#		,
+#					p -> solve(prob_trueode,Tsit5(),p=p)[1,:])
 
-# ╔═╡ b151308e-d89b-4d17-9c44-d5e7e4daafde
-p, st = Lux.setup(rng, dudt2)
+# ╔═╡ 51aae7db-45a2-48eb-b223-3c2ed4e82097
+p = Lux.initialparameters(rng,dudt2)
+
+# ╔═╡ ef49ad83-9e7a-4d07-bf9f-851289ddf4e7
+st = Lux.initialstates(rng, dudt2)
 
 # ╔═╡ f6a90f6a-9074-4969-92f0-d2fc37af60a9
 prob_neuralode = DiffEqFlux.NeuralODE(dudt2, tspan, Tsit5(), saveat = tsteps)
@@ -78,9 +109,12 @@ end
 # ╔═╡ 7f2aa049-38b8-4436-a04f-f639290e8b0b
 function loss_neuralode(p)
     pred = predict_neuralode(p)
-    loss = sum(abs2, data_trueode .- pred)
+    loss = sum(abs, data_trueode .- pred)
     return loss, pred
 end
+
+# ╔═╡ 1f020084-1d88-4bfd-9db0-74c24b140fdf
+predict_neuralode(p)
 
 # ╔═╡ 6c177fe8-0a99-4191-ad99-e0ea09181b99
 md"""
@@ -102,6 +136,7 @@ callback = function (p, l, pred; doplot = true)
 #  plt = scatter(tsteps, data_trueode[1,:], label = "data")
 #  scatter!(plt, tsteps, pred[1,:], label = "prediction")
 #  display(plot(plt))
+#	@gp tsteps pred[1,:]
 
 	return false
 end
@@ -119,20 +154,32 @@ adtype = Optimization.AutoZygote()
 # ╔═╡ 518669fa-1f43-42ea-80e0-73986387706c
 optf = Optimization.OptimizationFunction((x, p) -> loss_neuralode(x), adtype)
 
+# ╔═╡ 34d92bcd-4c40-48a3-a433-36571e575485
+optprob = Optimization.OptimizationProblem(optf, pinit)
+
+# ╔═╡ 3305bc34-4897-4eb5-b7c5-081d2e9ac62b
+md"# Train cell below here... ^_^"
+
 # ╔═╡ dd6c05ba-1712-4ea3-a458-ee27b6eb18ec
-result_neuralode = Optimization.solve(Optimization.OptimizationProblem(optf, Lux.ComponentArray(p)),
-                                       ADAM(0.05),
+result_neuralode = Optimization.solve(optprob,
+									ADAM(0.05),
                                        callback = callback,
-                                       maxiters = 10)
+                                       maxiters = 100)
+
+# ╔═╡ 9b6fd73a-205d-413d-a63d-92611346c168
+result_neuralode.u
+
+# ╔═╡ 963cfb8d-3b3a-4a68-981e-36d2a00b96c3
+predict_neuralode(result_neuralode.u)
 
 # ╔═╡ 54a05048-14b5-49c3-968c-5aade6868826
 losses
 
 # ╔═╡ e0e5a6d2-7981-48ec-9ec9-e745337913f3
-p
+result_neuralode
 
 # ╔═╡ 18264cb2-ec21-458b-9344-8bfe60dc61be
-plot(losses, label="loss")
+plot(losses)
 
 # ╔═╡ ba12bfde-0500-484a-babb-bc5a71b90fb5
 # ╠═╡ disabled = true
@@ -158,17 +205,18 @@ callback(result_neuralode2.u, loss_neuralode(result_neuralode2.u)...; doplot=tru
 # ╔═╡ cf71eb69-2d19-4c63-8037-a787468dac58
 # Time domain plot of the 1st variable
 begin
-	  pred = predict_neuralode(p)
-	  plt = scatter(tsteps, data_trueode[1,:], label = "data")
-	  scatter!(plt, tsteps, pred[1,:], label = "prediction")
+	  pred = predict_neuralode(result_neuralode.u)
+	  @gp tsteps data_trueode[1,:] "w lp title 'data1'"
+	  @gp :- tsteps pred[1,:] "w lp title 'prediction1'"
+	  @gp :- tsteps data_trueode[2,:] "w lp title 'data2'"
+	  @gp :- tsteps pred[2,:] "w lp title 'prediction2'"
 end
 
 # ╔═╡ 343abd2d-3a42-4fdc-8298-abae876e7e37
 # 2D plot of Lorenz phase space showing the lobes
 begin
-	plot()
-	  plot!(data_trueode'[:,1],data_trueode'[:,2], label = "data")
-	  plot!(pred'[:,1], pred'[:,2],label = "prediction")
+	@gp data_trueode'[:,1] data_trueode'[:,2]  "w lp title 'data'"
+	@gp :- pred'[:,1] pred'[:,2] "w lp title 'prediction'"
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -176,6 +224,7 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 DiffEqFlux = "aae7a2af-3d4f-5e19-a356-7da93b79d9d0"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+Gnuplot = "dc211083-a33a-5b79-959f-2ff34033469d"
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
 Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
@@ -185,6 +234,7 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 [compat]
 DiffEqFlux = "~1.50.0"
 DifferentialEquations = "~7.1.0"
+Gnuplot = "~1.4.1"
 Lux = "~0.4.6"
 Optimization = "~3.7.0"
 OptimizationOptimJL = "~0.1.1"
@@ -197,7 +247,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.0-rc1"
 manifest_format = "2.0"
-project_hash = "d1dfc0c6bdef7304062ba993602e38eebea19919"
+project_hash = "c3f089ec402cd079ff4ffeb65fac50e81c6c1039"
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -879,6 +929,12 @@ deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libic
 git-tree-sha1 = "a32d672ac2c967f3deb8a81d828afc739c838a06"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
 version = "2.68.3+2"
+
+[[deps.Gnuplot]]
+deps = ["ColorSchemes", "ColorTypes", "Colors", "DataStructures", "REPL", "ReplMaker", "StatsBase", "StructC14N", "Test"]
+git-tree-sha1 = "9405ce12e34ed50285fe13a00ffb340d2a283236"
+uuid = "dc211083-a33a-5b79-959f-2ff34033469d"
+version = "1.4.1"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1695,6 +1751,12 @@ git-tree-sha1 = "cdbd3b1338c72ce29d9584fdbe9e9b70eeb5adca"
 uuid = "05181044-ff0b-4ac5-8273-598c1e38db00"
 version = "0.1.3"
 
+[[deps.ReplMaker]]
+deps = ["REPL", "Unicode"]
+git-tree-sha1 = "f8bb680b97ee232c4c6591e213adc9c1e4ba0349"
+uuid = "b873ce64-0db9-51f5-a568-4457d8e49576"
+version = "0.2.7"
+
 [[deps.Requires]]
 deps = ["UUIDs"]
 git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
@@ -1882,6 +1944,12 @@ deps = ["Adapt", "DataAPI", "StaticArrays", "Tables"]
 git-tree-sha1 = "9abba8f8fb8458e9adf07c8a2377a070674a24f1"
 uuid = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 version = "0.6.8"
+
+[[deps.StructC14N]]
+deps = ["DataStructures", "Test"]
+git-tree-sha1 = "a3d153488e0fe30715835e66585532c0bcf460e9"
+uuid = "d2514e9c-36c4-5b8e-97e2-51e7675c221c"
+version = "0.3.1"
 
 [[deps.StructIO]]
 deps = ["Test"]
@@ -2287,18 +2355,22 @@ version = "0.9.1+5"
 # ╠═1a1f1c13-e418-475b-b4ec-db8bf3c15ea2
 # ╠═a5aa719e-f1a4-11ec-24c1-cdf9b3ba173b
 # ╟─b64a6376-9b71-4b85-887f-f9f3e1bccd83
+# ╠═046b6282-b65d-434e-9916-3454921497dd
 # ╠═7372e97b-dcdb-41b3-bb30-697b8c652482
+# ╠═292484ee-70ad-4e90-ac71-83a90968afb1
 # ╠═7bcdbdc4-95c7-4492-8898-7cedbd174335
 # ╠═7d54362e-053c-403e-9ca0-43a6f10c3185
-# ╠═7f06aea9-881c-4b41-b21e-c5c4ce599f71
-# ╠═2db04213-5bd5-43e9-b2b0-8b5cec3bd7ef
+# ╠═809b5607-5a18-49bd-8b32-cd3c53d93307
+# ╠═f4e1df28-652b-42de-835c-69a678d2b6dc
 # ╟─653a1bee-a90f-47a5-b77e-aa6f0721d738
 # ╠═127bfaa4-e619-40d4-bce0-de4e4069df2d
 # ╠═483fd793-0a45-41fd-a29d-ed80ac5158af
-# ╠═b151308e-d89b-4d17-9c44-d5e7e4daafde
+# ╠═51aae7db-45a2-48eb-b223-3c2ed4e82097
+# ╠═ef49ad83-9e7a-4d07-bf9f-851289ddf4e7
 # ╠═f6a90f6a-9074-4969-92f0-d2fc37af60a9
 # ╠═98685f21-7d18-41a1-92be-2d4a93ca1248
 # ╠═7f2aa049-38b8-4436-a04f-f639290e8b0b
+# ╠═1f020084-1d88-4bfd-9db0-74c24b140fdf
 # ╟─6c177fe8-0a99-4191-ad99-e0ea09181b99
 # ╠═8b94bcdb-2479-454b-ae34-95a2b51c553c
 # ╠═fd94353e-0698-4509-947e-fe542dfc7f1b
@@ -2306,7 +2378,11 @@ version = "0.9.1+5"
 # ╠═71628110-bba1-4994-9e6d-f1a229dffafb
 # ╠═71f7b01c-d75b-4234-b2c2-aa4711ef5cd4
 # ╠═518669fa-1f43-42ea-80e0-73986387706c
+# ╠═34d92bcd-4c40-48a3-a433-36571e575485
+# ╠═3305bc34-4897-4eb5-b7c5-081d2e9ac62b
 # ╠═dd6c05ba-1712-4ea3-a458-ee27b6eb18ec
+# ╠═9b6fd73a-205d-413d-a63d-92611346c168
+# ╠═963cfb8d-3b3a-4a68-981e-36d2a00b96c3
 # ╠═54a05048-14b5-49c3-968c-5aade6868826
 # ╠═e0e5a6d2-7981-48ec-9ec9-e745337913f3
 # ╠═18264cb2-ec21-458b-9344-8bfe60dc61be
